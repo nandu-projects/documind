@@ -18,13 +18,14 @@ import {
   BookOpen
 } from 'lucide-react';
 import { useDocuments } from '../../context/DocumentContext';
-import { SAMPLE_QUESTIONS } from '../../data/demoDocuments';
+
 
 export default function Dashboard({ setActiveTab, onSelectQuestion }) {
   const {
     documents,
     stats,
     activities,
+    suggestedQuestions,
     openDocumentViewer,
     loadDemoWorkspace,
     uploadProgress
@@ -172,56 +173,68 @@ export default function Dashboard({ setActiveTab, onSelectQuestion }) {
         </div>
       </div>
 
-      {/* Demo Quick Questions Section */}
-      <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span>Exhibition Ready — 1-Click Sample Questions</span>
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Click any verified question below to test retrieval accuracy, exact page citations, and synthesized answers.
-            </p>
+      {/* Dynamic Suggested Questions Section */}
+      {suggestedQuestions.length > 0 && (
+        <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>
+                  {documents.some(d => !d.isDemo)
+                    ? 'AI Document Insights — Suggested Questions for Your Uploads'
+                    : 'Exhibition Ready — 1-Click Sample Questions'}
+                </span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {documents.some(d => !d.isDemo)
+                  ? 'Dynamically extracted questions covering policies, formulas, definitions, and procedures in your uploaded documents.'
+                  : 'Click any verified question below to test retrieval accuracy, exact page citations, and synthesized answers.'}
+              </p>
+            </div>
+
+            {documents.length === 0 && (
+              <button
+                onClick={loadDemoWorkspace}
+                disabled={uploadProgress.active}
+                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <span>Load 4 sample documents first</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
-          {documents.length === 0 && (
-            <button
-              onClick={loadDemoWorkspace}
-              disabled={uploadProgress.active}
-              className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-            >
-              <span>Load 4 sample documents first</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-          {SAMPLE_QUESTIONS.map((sq) => (
-            <button
-              key={sq.id}
-              onClick={() => handleQuestionClick(sq.question)}
-              className="group p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 dark:hover:border-indigo-500/50 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-indigo-50/30 dark:hover:bg-indigo-950/20 text-left transition-all flex items-center justify-between gap-3 cursor-pointer"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300">
-                    {sq.category}
-                  </span>
-                  <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                    Target: {sq.expectedDoc}
-                  </span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            {suggestedQuestions.map((sq) => (
+              <button
+                key={sq.id}
+                onClick={() => handleQuestionClick(sq.question)}
+                className="group p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 dark:hover:border-indigo-500/50 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-indigo-50/30 dark:hover:bg-indigo-950/20 text-left transition-all flex items-center justify-between gap-3 cursor-pointer"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    {sq.category && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300">
+                        {sq.category}
+                      </span>
+                    )}
+                    {sq.expectedDoc && (
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate max-w-[200px]">
+                        Target: {sq.expectedDoc}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-medium text-slate-800 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                    {sq.question}
+                  </p>
                 </div>
-                <p className="text-sm font-medium text-slate-800 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                  {sq.question}
-                </p>
-              </div>
-              <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all shrink-0" />
-            </button>
-          ))}
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all shrink-0" />
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Main Two-Column Layout: Recent Documents & Activity Log */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

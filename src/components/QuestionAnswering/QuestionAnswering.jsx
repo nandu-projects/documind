@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   MessageSquareCode,
   Search,
@@ -14,10 +14,12 @@ import {
   HelpCircle,
   BookOpen,
   Filter,
-  ArrowRight
+  ArrowRight,
+  RotateCcw,
+  Tag,
+  Info
 } from 'lucide-react';
 import { useDocuments } from '../../context/DocumentContext';
-import { SAMPLE_QUESTIONS } from '../../data/demoDocuments';
 import { highlightText } from '../../services/nlpEngine';
 
 export default function QuestionAnswering({ initialQuestion = '', onClearInitialQuestion }) {
@@ -26,7 +28,8 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
     executeQA,
     openDocumentViewer,
     loadDemoWorkspace,
-    uploadProgress
+    uploadProgress,
+    getScopedSuggestedQuestions,
   } = useDocuments();
 
   const [question, setQuestion] = useState(initialQuestion || '');
@@ -34,6 +37,11 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
   const [isLoading, setIsLoading] = useState(false);
   const [qaResult, setQaResult] = useState(null);
   const [copiedAnswer, setCopiedAnswer] = useState(false);
+
+  // Dynamically compute suggested questions tailored to the active filter and uploaded documents
+  const activeSuggestedQuestions = useMemo(() => {
+    return getScopedSuggestedQuestions(selectedDocId);
+  }, [getScopedSuggestedQuestions, selectedDocId]);
 
   // If initialQuestion changes from dashboard or sample pill
   useEffect(() => {
@@ -46,7 +54,7 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
     }
   }, [initialQuestion]);
 
-  const handleAsk = async (qToAsk = null) => {
+  const handleAsk = async (qToAsk = null, overrideFilterDocId = undefined) => {
     const targetQuery = (typeof qToAsk === 'string' ? qToAsk : question).trim();
     if (!targetQuery) return;
 
@@ -55,8 +63,9 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
 
     try {
       const filters = {};
-      if (selectedDocId) {
-        filters.docId = selectedDocId;
+      const filterId = overrideFilterDocId !== undefined ? overrideFilterDocId : selectedDocId;
+      if (filterId) {
+        filters.docId = filterId;
       }
       const res = await executeQA(targetQuery, filters);
       setQaResult(res);
@@ -86,6 +95,13 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
     }
   };
 
+  const handleClearScope = () => {
+    setSelectedDocId('');
+    if (question.trim()) {
+      handleAsk(question, '');
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-fadeIn">
       {/* Top Banner */}
@@ -95,7 +111,7 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
           <span>Intelligent Question Answering</span>
         </h2>
         <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-xl mx-auto">
-          Ask questions in natural English. DocuMind searches indexed passages, extracts truthful facts, and provides verified source page numbers.
+          Ask questions in natural English. DocuMind utilizes BM25 retrieval, query expansion, and sentence scoring to extract truthful facts with verifiable source page numbers.
         </p>
       </div>
 
@@ -114,7 +130,7 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
               <option value="">All Uploaded Documents ({documents.length})</option>
               {documents.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.name} ({d.pageCount} pages)
+                  {d.name} ({d.pageCount} pages){d.isDemo ? ' [Demo]' : ''}
                 </option>
               ))}
             </select>
@@ -136,7 +152,7 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
         <div className="relative">
           <input
             type="text"
-            placeholder="e.g., What is the minimum attendance requirement? or What are the project submission guidelines?"
+            placeholder="Ask anything about formulas, regulations, numbers, policies, definitions, or procedures..."
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -161,27 +177,36 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
           </button>
         </div>
 
-        {/* Clickable Quick Sample Queries */}
-        <div className="space-y-2 pt-1">
-          <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-            Quick Sample Questions:
-          </span>
-          <div className="flex flex-wrap gap-2">
-            {SAMPLE_QUESTIONS.map((sq) => (
-              <button
-                key={sq.id}
-                onClick={() => {
-                  setQuestion(sq.question);
-                  handleAsk(sq.question);
-                }}
-                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/40 text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 border border-slate-200/60 dark:border-slate-700/60 text-xs font-medium transition-all text-left flex items-center gap-1.5 cursor-pointer"
-              >
-                <Sparkles className="w-3 h-3 text-indigo-500 shrink-0" />
-                <span>{sq.question}</span>
-              </button>
-            ))}
+        {/* Dynamic Suggested Questions based on Active Documents */}
+        {activeSuggestedQuestions.length > 0 && (
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3 h-3 text-indigo-500" />
+                <span>Suggested Questions for {selectedDocId ? 'Selected Document' : 'Uploaded Library'}:</span>
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {activeSuggestedQuestions.map((sq) => (
+                <button
+                  key={sq.id}
+                  onClick={() => {
+                    setQuestion(sq.question);
+                    handleAsk(sq.question);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/40 text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 border border-slate-200/60 dark:border-slate-700/60 text-xs font-medium transition-all text-left flex items-center gap-1.5 cursor-pointer"
+                >
+                  {sq.category && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-semibold">
+                      {sq.category}
+                    </span>
+                  )}
+                  <span>{sq.question}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Answer Presentation Card */}
@@ -204,17 +229,17 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
                       : 'bg-amber-500'
                   }`}
                 >
-                  <Sparkles className="w-4 h-4" />
+                  {qaResult.found ? <Sparkles className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                    {qaResult.found ? 'Synthesized Factual Answer' : 'No Direct Answer Found'}
+                    {qaResult.found ? 'Synthesized Factual Answer' : 'No Relevant Information Found'}
                   </h3>
                   <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>Query took {qaResult.duration}ms</span>
+                    <span>Query execution: {qaResult.duration}ms</span>
                     <span>•</span>
                     <span className="font-semibold text-indigo-600 dark:text-indigo-400">
-                      Relevance: {qaResult.confidence}%
+                      Confidence: {qaResult.confidence}%
                     </span>
                   </div>
                 </div>
@@ -244,6 +269,55 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
             <div className="text-sm sm:text-base leading-relaxed text-slate-800 dark:text-slate-200 font-normal">
               {qaResult.answer}
             </div>
+
+            {/* Detailed Explanation and Recovery when Not Found */}
+            {!qaResult.found && (
+              <div className="p-4 rounded-2xl bg-amber-100/50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 space-y-3 text-xs">
+                <div className="flex items-center gap-2 font-semibold text-amber-900 dark:text-amber-200">
+                  <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>Why couldn't an answer be found?</span>
+                </div>
+                <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
+                  {qaResult.reason || 'None of the indexed text passages contained sufficient semantic or keyword overlap for this query.'}
+                </p>
+
+                {selectedDocId && (
+                  <div className="pt-2 flex items-center gap-2">
+                    <span className="text-slate-500 dark:text-slate-400">Currently searching only in selected document.</span>
+                    <button
+                      onClick={handleClearScope}
+                      className="px-3 py-1 rounded-lg bg-indigo-600 text-white font-semibold text-xs hover:bg-indigo-700 transition-all cursor-pointer"
+                    >
+                      Search Across All Documents
+                    </button>
+                  </div>
+                )}
+
+                {/* Suggested alternative questions from the documents */}
+                {qaResult.suggestedQuestions && qaResult.suggestedQuestions.length > 0 && (
+                  <div className="pt-2 space-y-2 border-t border-amber-200/60 dark:border-amber-800/50">
+                    <span className="font-bold text-slate-700 dark:text-slate-300">
+                      Try asking one of these questions from your uploaded document instead:
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {qaResult.suggestedQuestions.map((sq) => (
+                        <button
+                          key={sq.id}
+                          onClick={() => {
+                            setQuestion(sq.question);
+                            handleAsk(sq.question);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 font-medium transition-all text-left flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Sparkles className="w-3 h-3 text-indigo-500" />
+                          <span>{sq.question}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Source Citations Badges */}
             {qaResult.sources && qaResult.sources.length > 0 && (
@@ -278,7 +352,7 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
                   <Layers className="w-4 h-4 text-indigo-600" />
-                  <span>Supporting Passages Ranked by BM25 ({qaResult.passages.length})</span>
+                  <span>Original Source Passages Ranked by BM25 ({qaResult.passages.length})</span>
                 </h3>
               </div>
 
@@ -296,11 +370,21 @@ export default function QuestionAnswering({ initialQuestion = '', onClearInitial
                         <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 font-bold text-slate-600 dark:text-slate-400 text-[11px]">
                           Page {p.pageNum}
                         </span>
+                        {p.hasMath && (
+                          <span className="px-1.5 py-0.2 rounded bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 text-[10px] font-semibold">
+                            Formula / Math
+                          </span>
+                        )}
+                        {p.hasDefinition && (
+                          <span className="px-1.5 py-0.2 rounded bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-[10px] font-semibold">
+                            Definition
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
                         <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold text-[11px]">
-                          Match: {p.score}%
+                          Score: {p.score}%
                         </span>
                         <button
                           onClick={() => openDocumentViewer(p.docId, p.pageNum)}

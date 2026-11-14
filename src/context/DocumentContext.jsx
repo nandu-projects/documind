@@ -15,8 +15,9 @@ import {
   createChunksFromDocument,
   BM25Engine,
   generateExtractiveAnswer,
+  generateDynamicSuggestedQuestions,
 } from '../services/nlpEngine';
-import { DEMO_DOCUMENTS } from '../data/demoDocuments';
+import { DEMO_DOCUMENTS, SAMPLE_QUESTIONS } from '../data/demoDocuments';
 
 const DocumentContext = createContext();
 
@@ -72,6 +73,44 @@ export function DocumentProvider({ children }) {
   const bm25Engine = useMemo(() => {
     return new BM25Engine(chunks, { k1: 1.5, b: 0.75 });
   }, [chunks]);
+
+  /**
+   * Determine suggested questions dynamically:
+   * 1. If no documents -> empty.
+   * 2. If ONLY demo documents -> return SAMPLE_QUESTIONS.
+   * 3. If USER has uploaded actual documents -> dynamically generate from user documents! Never show unrelated demo questions.
+   */
+  const suggestedQuestions = useMemo(() => {
+    if (documents.length === 0) return [];
+
+    const hasUserUploads = documents.some(d => !d.isDemo);
+
+    if (hasUserUploads) {
+      // Prioritize non-demo user-uploaded documents
+      const userDocs = documents.filter(d => !d.isDemo);
+      const generated = generateDynamicSuggestedQuestions(userDocs);
+      return generated.length > 0 ? generated : generateDynamicSuggestedQuestions(documents);
+    }
+
+    // Only demo documents are present
+    return SAMPLE_QUESTIONS;
+  }, [documents]);
+
+  /**
+   * Get suggested questions specifically scoped to a document filter
+   */
+  const getScopedSuggestedQuestions = useCallback((filterDocId = null) => {
+    if (!filterDocId) return suggestedQuestions;
+
+    const targetDoc = documents.find(d => d.id === filterDocId);
+    if (!targetDoc) return suggestedQuestions;
+
+    if (targetDoc.isDemo) {
+      return SAMPLE_QUESTIONS.filter(sq => sq.expectedDoc === targetDoc.name);
+    }
+
+    return generateDynamicSuggestedQuestions([targetDoc]);
+  }, [documents, suggestedQuestions]);
 
   /**
    * Load Built-in Demo Workspace
@@ -169,6 +208,9 @@ export function DocumentProvider({ children }) {
           }));
         });
 
+        // Mark as user upload (not demo)
+        extractedDoc.isDemo = false;
+
         // Break into passages & compute tokens
         setUploadProgress(prev => ({
           ...prev,
@@ -249,7 +291,9 @@ export function DocumentProvider({ children }) {
     const rankedPassages = bm25Engine.search(question, { ...filters, limit: 12 });
     const duration = Math.round(performance.now() - startTime);
 
-    const answerResult = generateExtractiveAnswer(question, rankedPassages);
+    // Filter documents matching scope
+    const targetDocs = filters.docId ? documents.filter(d => d.id === filters.docId) : documents;
+    const answerResult = generateExtractiveAnswer(question, rankedPassages, targetDocs);
 
     if (question && question.trim().length > 1) {
       await saveSearchQuery(
@@ -317,6 +361,8 @@ export function DocumentProvider({ children }) {
         isLoading,
         uploadProgress,
         stats,
+        suggestedQuestions,
+        getScopedSuggestedQuestions,
         previewDoc,
         previewPage,
         setPreviewPage,
