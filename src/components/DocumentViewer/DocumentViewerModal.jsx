@@ -10,7 +10,9 @@ import {
   FileText,
   Calendar,
   Layers,
-  HardDrive
+  HardDrive,
+  AlertTriangle,
+  Sigma
 } from 'lucide-react';
 import { useDocuments } from '../../context/DocumentContext';
 import { highlightText } from '../../services/nlpEngine';
@@ -75,6 +77,29 @@ export default function DocumentViewerModal() {
                   <HardDrive className="w-3.5 h-3.5" />
                   {(previewDoc.size / 1024).toFixed(0)} KB
                 </span>
+                {previewDoc.qualityRating && (
+                  <>
+                    <span>•</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-md font-semibold text-[10px] ${
+                        previewDoc.needsOCR || previewDoc.qualityRating.includes('OCR')
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                          : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                      }`}
+                    >
+                      {previewDoc.qualityRating} {previewDoc.qualityScore ? `(${previewDoc.qualityScore}%)` : ''}
+                    </span>
+                  </>
+                )}
+                {previewDoc.hasMath && (
+                  <>
+                    <span>•</span>
+                    <span className="px-2 py-0.5 rounded-md font-semibold text-[10px] bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 flex items-center gap-1">
+                      <Sigma className="w-2.5 h-2.5" />
+                      <span>Math Content</span>
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -139,12 +164,31 @@ export default function DocumentViewerModal() {
 
         {/* Page Content Body */}
         <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-4 font-mono text-sm leading-relaxed text-slate-800 dark:text-slate-200 select-text">
+          {/* Scanned PDF / OCR required banner */}
+          {currentPageData.needsOCR && (
+            <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-200 text-xs flex items-center gap-2.5 font-sans">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <div>
+                <span className="font-bold">Scanned / Low Density Page: </span>
+                <span>This page contains image or scanned content with fewer than 12 text tokens. Optical Character Recognition (OCR) is required to extract full text.</span>
+              </div>
+            </div>
+          )}
+
+          {/* Math detected indicator */}
+          {currentPageData.hasMath && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 text-purple-700 dark:text-purple-300 text-xs font-semibold font-sans">
+              <Sigma className="w-3.5 h-3.5" />
+              <span>Mathematical Equations, Formulas or Notation Active on Page {previewPage}</span>
+            </div>
+          )}
+
           <div className="p-6 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800/80 shadow-inner whitespace-pre-wrap">
             {internalQuery.trim() ? (
               <div dangerouslySetInnerHTML={{ __html: highlightedContent }} />
             ) : (
               currentPageData.text || (
-                <span className="text-slate-400 italic">No text content found on this page.</span>
+                <span className="text-slate-400 italic font-sans">No text content found on this page.</span>
               )
             )}
           </div>

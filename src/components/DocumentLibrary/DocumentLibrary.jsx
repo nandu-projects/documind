@@ -13,7 +13,10 @@ import {
   List,
   Sparkles,
   AlertTriangle,
-  HardDrive
+  HardDrive,
+  CheckCircle2,
+  Sigma,
+  HelpCircle
 } from 'lucide-react';
 import { useDocuments } from '../../context/DocumentContext';
 
@@ -184,11 +187,30 @@ export default function DocumentLibrary({ setActiveTab, onSelectDocForSummary })
                     </div>
                   </div>
 
-                  {doc.isDemo && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-                      Demo
-                    </span>
-                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {doc.isDemo && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                        Demo
+                      </span>
+                    )}
+                    {doc.hasMath && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 flex items-center gap-1">
+                        <Sigma className="w-2.5 h-2.5" />
+                        <span>Math</span>
+                      </span>
+                    )}
+                    {doc.qualityRating && (
+                      <span
+                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
+                          doc.needsOCR || doc.qualityRating.includes('OCR')
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        }`}
+                      >
+                        {doc.qualityRating}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400 pt-1">
@@ -199,6 +221,14 @@ export default function DocumentLibrary({ setActiveTab, onSelectDocForSummary })
                   <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 flex items-center gap-1.5">
                     <FileSpreadsheet className="w-3.5 h-3.5 text-blue-500" />
                     <span>{doc.totalWords || 0} Words</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>{doc.meaningfulPassages || (doc.pages ? doc.pages.length * 3 : 0)} Passages</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 flex items-center gap-1.5">
+                    <HelpCircle className="w-3.5 h-3.5 text-amber-500" />
+                    <span>{doc.suggestedQuestions?.length || doc.generatedQuestionsCount || 0} Questions</span>
                   </div>
                 </div>
 
@@ -255,6 +285,7 @@ export default function DocumentLibrary({ setActiveTab, onSelectDocForSummary })
                   <th className="py-3 px-4">Document</th>
                   <th className="py-3 px-4">Pages</th>
                   <th className="py-3 px-4">Words</th>
+                  <th className="py-3 px-4">Quality</th>
                   <th className="py-3 px-4">Size</th>
                   <th className="py-3 px-4">Indexed Date</th>
                   <th className="py-3 px-4 text-right">Actions</th>
@@ -263,17 +294,40 @@ export default function DocumentLibrary({ setActiveTab, onSelectDocForSummary })
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-slate-700 dark:text-slate-300">
                 {filteredDocs.map((doc) => (
                   <tr key={doc.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white flex items-center gap-2.5">
-                      <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
-                      <span className="truncate max-w-xs">{doc.name}</span>
-                      {doc.isDemo && (
-                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-                          Demo
-                        </span>
-                      )}
+                    <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                        <span className="truncate max-w-[220px]" title={doc.name}>{doc.name}</span>
+                        {doc.isDemo && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                            Demo
+                          </span>
+                        )}
+                        {doc.hasMath && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 flex items-center gap-0.5">
+                            <Sigma className="w-2.5 h-2.5" />
+                            <span>Math</span>
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-3 px-4">{doc.pageCount}</td>
                     <td className="py-3 px-4">{doc.totalWords || 0}</td>
+                    <td className="py-3 px-4">
+                      {doc.qualityRating ? (
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
+                            doc.needsOCR || doc.qualityRating.includes('OCR')
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          }`}
+                        >
+                          {doc.qualityRating}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-xs">Standard</span>
+                      )}
+                    </td>
                     <td className="py-3 px-4">{(doc.size / 1024).toFixed(0)} KB</td>
                     <td className="py-3 px-4 text-slate-500 dark:text-slate-400">
                       {new Date(doc.uploadDate).toLocaleDateString()}

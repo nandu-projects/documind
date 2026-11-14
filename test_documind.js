@@ -31,6 +31,11 @@ import {
   SAMPLE_QUESTIONS,
 } from './src/data/demoDocuments.js';
 
+import {
+  computePDFHash,
+  reconstructPageText,
+} from './src/services/pdfParser.js';
+
 console.log('====================================================');
 console.log('   DOCUMIND — AUTOMATED TEST & VERIFICATION SUITE   ');
 console.log('====================================================\n');
@@ -261,6 +266,131 @@ const validPdfBuffer = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2D]); // "%PDF-
 const validHeaderStr = String.fromCharCode(...validPdfBuffer);
 assert(validHeaderStr.startsWith('%PDF-'), 'Recognizes valid %PDF- magic bytes');
 
+// -----------------------------------------------------------
+// 11. PDF Hash Computation & Duplicate Detection Tests
+// -----------------------------------------------------------
+console.log('\n--- 11. Testing PDF Hash Computation & Duplicate Detection ---');
+const docBytesA = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37, 0x0A, 0x25, 0xE2, 0xE3, 0xCF, 0xD3]);
+const docBytesB = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37, 0x0A, 0x25, 0xE2, 0xE3, 0xCF, 0xD3]);
+const docBytesC = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34, 0x0A, 0x25, 0xAA, 0xBB, 0xCC, 0xDD]);
+
+const hashA = await computePDFHash(docBytesA.buffer);
+const hashB = await computePDFHash(docBytesB.buffer);
+const hashC = await computePDFHash(docBytesC.buffer);
+
+assert(typeof hashA === 'string' && hashA.length >= 8, `Hash A generated successfully: ${hashA.slice(0, 16)}...`);
+assert(hashA === hashB, 'Identical PDF array buffers produce identical hash for duplicate detection');
+assert(hashA !== hashC, 'Distinct PDF contents produce unique distinct hashes');
+
+// -----------------------------------------------------------
+// 12. Spatial PDF Reconstruction & Hyphenation Repair
+// -----------------------------------------------------------
+console.log('\n--- 12. Testing Multi-Column Reading Order & Hyphenation Repair ---');
+
+// Create mock 2-column text items (20 items on left col x=50, 20 items on right col x=350)
+const mockTwoColItems = [];
+for (let i = 0; i < 20; i++) {
+  mockTwoColItems.push({
+    str: `LeftColumn Line ${i + 1} discusses introductory algorithms.`,
+    transform: [1, 0, 0, 1, 50, 800 - (i * 20)],
+    width: 180,
+    height: 12,
+  });
+}
+for (let i = 0; i < 20; i++) {
+  mockTwoColItems.push({
+    str: `RightColumn Line ${i + 1} elaborates on advanced neural architectures.`,
+    transform: [1, 0, 0, 1, 350, 800 - (i * 20)],
+    width: 180,
+    height: 12,
+  });
+}
+
+const twoColResult = reconstructPageText(mockTwoColItems, 600);
+assert(twoColResult.hasMultiColumn === true, 'Accurately detected 2-column layout from spatial coordinates');
+const firstLeftIdx = twoColResult.text.indexOf('LeftColumn Line 1');
+const firstRightIdx = twoColResult.text.indexOf('RightColumn Line 1');
+assert(firstLeftIdx !== -1 && firstRightIdx !== -1, 'Both column contents preserved');
+assert(firstLeftIdx < firstRightIdx, 'Preserves natural reading order: Left column precedes right column');
+
+// Hyphenation test: "algo-" on line 1, "rithm" on line 2
+const hyphenItems = [
+  { str: 'The machine learning algo-', transform: [1, 0, 0, 1, 50, 700], width: 120, height: 10 },
+  { str: 'rithm optimizes loss functions.', transform: [1, 0, 0, 1, 50, 688], width: 140, height: 10 },
+];
+const hyphenResult = reconstructPageText(hyphenItems, 600);
+assert(hyphenResult.text.includes('algorithm optimizes'), `Hyphenation correctly repaired: "${hyphenResult.text}"`);
+
+// -----------------------------------------------------------
+// 13. Mathematics Document Support & Unicode Symbol Preservation
+// -----------------------------------------------------------
+console.log('\n--- 13. Testing Mathematics Document Support & Symbol Preservation ---');
+
+const mathItems = [
+  { str: 'Theorem 3.1: Given continuous function f(x) where θ ≥ 0 and x ∈ [0, π]:', transform: [1, 0, 0, 1, 50, 700], width: 300, height: 12 },
+  { str: 'The definite integral is evaluated as ∫ x² dx = π³ / 3.', transform: [1, 0, 0, 1, 50, 680], width: 280, height: 12 },
+  { str: 'Furthermore, the summation ∑ a_i ≤ √π must converge.', transform: [1, 0, 0, 1, 50, 660], width: 260, height: 12 },
+];
+const mathResult = reconstructPageText(mathItems, 600);
+assert(mathResult.hasMath === true, 'Detected mathematical document content flag (hasMath: true)');
+assert(mathResult.text.includes('∫ x² dx') && mathResult.text.includes('θ ≥ 0'), 'Preserves unicode integral ∫, superscript x², and inequality θ ≥ 0');
+assert(mathResult.text.includes('∑') && mathResult.text.includes('√π'), 'Preserves summation ∑ and square root √π symbols');
+
+const mathTokens = tokenize(mathResult.text, true);
+assert(mathTokens.includes('∫') || mathTokens.includes('x²'), 'Tokenize preserves mathematical operator tokens');
+
+// Test BM25 indexing and querying of mathematics
+const mathDoc = {
+  id: 'doc_math_calculus_01',
+  name: 'Advanced_Calculus_and_Integration.pdf',
+  isDemo: false,
+  pages: [{ pageNum: 1, text: mathResult.text }],
+};
+const mathChunks = createChunksFromDocument(mathDoc, 100, 20);
+const mathBM25 = new BM25Engine(mathChunks);
+const mathQueryResults = mathBM25.search('∫ x² dx integral');
+assert(mathQueryResults.length > 0, 'BM25 retrieves passages for mathematical symbol queries (∫ x² dx)');
+
+// -----------------------------------------------------------
+// 14. Scanned PDF & OCR Detection Quality Check
+// -----------------------------------------------------------
+console.log('\n--- 14. Testing Scanned PDF Detection & OCR Quality Rating ---');
+
+// Scanned image page with only 4 stray OCR/header words
+const scannedItems = [
+  { str: 'Scan Figure 4B', transform: [1, 0, 0, 1, 50, 700], width: 80, height: 10 },
+];
+const scannedResult = reconstructPageText(scannedItems, 600);
+assert(scannedResult.needsOCR === true, 'Flags low-density scanned page as needing OCR');
+assert(scannedResult.wordCount < 12, `Accurately counted low token count: ${scannedResult.wordCount} words`);
+
+// Empty page
+const emptyResult = reconstructPageText([]);
+assert(emptyResult.needsOCR === true && emptyResult.wordCount === 0, 'Empty page flags needsOCR: true');
+
+// -----------------------------------------------------------
+// 15. Demo Data Isolation Verification
+// -----------------------------------------------------------
+console.log('\n--- 15. Testing Strict Demo Data Isolation ---');
+
+const mixedDocuments = [customUserDoc, ...DEMO_DOCUMENTS];
+const hasUserUploadedDocs = mixedDocuments.some(d => !d.isDemo);
+assert(hasUserUploadedDocs === true, 'Detected presence of user-uploaded document');
+
+// Workspace questions when user document is present:
+const scopedUserQuestions = generateDynamicSuggestedQuestions(
+  hasUserUploadedDocs ? mixedDocuments.filter(d => !d.isDemo) : mixedDocuments
+);
+assert(scopedUserQuestions.length > 0, `Generated ${scopedUserQuestions.length} scoped questions`);
+
+const containsDemoQuestion = scopedUserQuestions.some(q =>
+  q.question.toLowerCase().includes('attendance') ||
+  q.question.toLowerCase().includes('hostel') ||
+  q.question.toLowerCase().includes('library opening hours')
+);
+assert(!containsDemoQuestion, 'Strict isolation verified: User documents completely hide demo questions!');
+
 console.log('\n====================================================');
 console.log(`   TEST RESULTS: ${passedTests} / ${totalTests} PASSED (100%)`);
 console.log('====================================================\n');
+

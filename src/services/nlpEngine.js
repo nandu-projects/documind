@@ -1,7 +1,8 @@
 /**
  * DocuMind NLP & Information Retrieval Engine
  * High-performance client-side BM25 Okapi, Query Expansion, Semantic Heuristics,
- * Document Understanding (Formulas, Definitions, Numbers, Examples) & Extractive QA.
+ * Deep Document Understanding (Mathematical Expressions, Unicode Symbols, Definitions, Theorems,
+ * Numerical Policies) & Extractive Question Answering.
  */
 
 // Comprehensive English stopwords list
@@ -26,7 +27,7 @@ export const STOPWORDS = new Set([
 
 /**
  * Domain Synonyms and Query Expansion Dictionary
- * Enables matching paraphrases, conversational questions, and alternate terminology.
+ * Enables matching paraphrases, mathematical notations, and alternate terminology.
  */
 export const SYNONYM_MAP = {
   // Academics & Rules
@@ -59,17 +60,24 @@ export const SYNONYM_MAP = {
   // Security & Safety
   'security': ['safety', 'protection', 'guard', 'helpline', 'emergency', 'curfew', 'identity', 'surveillance'],
   'safety': ['security', 'protection', 'emergency', 'hazard', 'protocol', 'evacuation', 'precaution'],
-  'rules_sec': ['protocol', 'access', 'identity', 'curfew', 'restriction'],
 
-  // Mathematical & Technical
-  'formula': ['equation', 'calculation', 'expression', 'algorithm', 'computation', 'mathematical', 'calculate', 'ratio'],
-  'equation': ['formula', 'expression', 'calculation', 'equality', 'relation'],
-  'calculate': ['computation', 'formula', 'equation', 'determine', 'derive', 'measure'],
+  // Mathematical & Scientific Concepts
+  'formula': ['equation', 'calculation', 'expression', 'algorithm', 'computation', 'mathematical', 'calculate', 'ratio', 'relation', 'theorem'],
+  'equation': ['formula', 'expression', 'calculation', 'equality', 'relation', 'theorem', 'identity'],
+  'calculate': ['computation', 'formula', 'equation', 'determine', 'derive', 'measure', 'evaluate'],
+  'integral': ['∫', 'integrate', 'integration', 'calculus', 'antiderivative'],
+  'summation': ['∑', 'sigma', 'sum', 'series', 'total'],
+  'root': ['√', 'square root', 'radical', 'sqrt'],
+  'pi': ['π', '3.14', 'circumference', 'constant'],
+  'theta': ['θ', 'angle', 'radian'],
+  'derivative': ['differentiation', 'dx', 'dy', 'gradient', 'rate of change', 'partial', '∂'],
+  'theorem': ['proof', 'lemma', 'corollary', 'proposition', 'identity'],
+  'problem': ['exercise', 'question', 'problem statement', 'example', 'task', 'solution'],
   'grade': ['score', 'marks', 'grading', 'cgpa', 'gpa', 'percentage', 'evaluation', 'scale'],
   'grades': ['scores', 'marks', 'grading', 'cgpa', 'gpa', 'percentages'],
   'plagiarism': ['similarity', 'turnitin', 'urkund', 'originality', 'academic integrity', 'copying'],
 
-  // Concept & Definitions
+  // Definitions & Concepts
   'definition': ['meaning', 'define', 'concept', 'explanation', 'term', 'description'],
   'define': ['definition', 'meaning', 'concept', 'refers to', 'denotes'],
   'example': ['instance', 'sample', 'illustration', 'case'],
@@ -82,6 +90,11 @@ export const SYNONYM_MAP = {
 export function stem(word) {
   if (!word || word.length < 3) return word;
   let w = word.toLowerCase();
+
+  // Preserve unicode math tokens without clipping
+  if (/[∫∑√πθ≥≤≠±∞∂αβγx²x³]/.test(w)) {
+    return w;
+  }
 
   // Basic step 1: Plurals and suffixes
   if (w.endsWith('sses')) w = w.slice(0, -2);
@@ -106,42 +119,45 @@ export function stem(word) {
 }
 
 /**
- * Tokenizes string into cleaned words and stems
+ * Tokenizes string into cleaned words, math symbols, and stems
+ * Preserves unicode math symbols: ∫, ∑, √, π, θ, ≥, ≤, ≠, ±, ∞, ∂, α, β, γ, x², x³
  */
 export function tokenize(text, removeStopwords = true) {
   if (!text || typeof text !== 'string') return [];
   
-  // Extract alphanumeric sequences (supporting percentages, currency, and numerical thresholds)
-  const rawWords = text.toLowerCase().match(/\b[a-z0-9]+(?:'[a-z]+)?%?\b/g) || [];
+  // Match standard alphanumeric words, percentages, and single/multi-char math symbols
+  const rawWords = text.toLowerCase().match(/[\w∫∑√πθ≥≤≠±∞∂αβγx²x³x₁x₂%]+(?:'[a-z]+)?/g) || [];
   
   const tokens = [];
   for (const word of rawWords) {
     if (removeStopwords && STOPWORDS.has(word)) continue;
-    if (word.length <= 1 && !/^\d+$/.test(word) && word !== '%') continue;
+    // Allow meaningful single-character math symbols
+    const isMathSymbol = /[∫∑√πθ∂∞%≥≤≠±]/.test(word);
+    if (word.length <= 1 && !/^\d+$/.test(word) && !isMathSymbol) continue;
     tokens.push(word);
   }
   return tokens;
 }
 
 /**
- * Splits text into sentences cleanly while preserving acronyms and decimal numbers
+ * Splits text into sentences cleanly while preserving acronyms, decimals, and math equations
  */
 export function splitIntoSentences(text) {
   if (!text) return [];
   // Clean newlines that occur mid-sentence
   const normalized = text.replace(/([a-z0-9])\n+([a-z0-9])/gi, '$1 $2');
-  // Match sentences without breaking decimals like 8.5 or 1.1 or abbreviations like e.g. / i.e.
+  // Split on sentence terminators while ignoring numbers like 8.5 or section headers like 1.1
   const sentences = normalized.match(/[^.!?\n]+(?:[.!?\n]+["']?|$)/g) || [];
   return sentences
     .map(s => s.trim())
-    .filter(s => s.length > 8 && /\w+/.test(s));
+    .filter(s => s.length >= 10 && /\w+/.test(s));
 }
 
 /**
  * Expands a list of query tokens using the synonym dictionary
  */
 export function expandQueryTokens(tokens) {
-  const expanded = new Map(); // token/synonym -> weight (1.0 for original, 0.65 for synonym)
+  const expanded = new Map(); // token/synonym -> weight
 
   for (const token of tokens) {
     expanded.set(token, 1.0);
@@ -176,14 +192,13 @@ export function expandQueryTokens(tokens) {
 }
 
 /**
- * Detects whether text contains mathematical equations, formulas or numerical relationships
+ * Detects whether text contains mathematical equations, formulas, symbols or theorems
  */
 export function hasMathematicalContent(text) {
   if (!text) return false;
-  // Look for equals signs with variables, arithmetic symbols, summation, Greek letters, or formula labels
-  return /\b(formula|equation|calculate|algorithm|ratio|score\(|sum\b|cgpa|gpa|marks)\b/i.test(text) ||
-    /[a-zA-Z0-9_]\s*=\s*[^,;.]{2,}/.test(text) ||
-    /[-+*/=><∑Δλθπ%]\s*[\d\w]/.test(text);
+  return /[∫∑√πθ≥≤≠±∞∂αβγx²x³x₁x₂=+\-*/^%]/.test(text) ||
+    /\b(formula|equation|calculate|algorithm|ratio|score\(|sum\b|integral|derivative|matrix|theorem|lemma|proof|cgpa|gpa|marks|threshold|percentage)\b/i.test(text) ||
+    /[a-zA-Z0-9_]\s*=\s*[^,;.]{2,}/.test(text);
 }
 
 /**
@@ -195,8 +210,8 @@ export function hasDefinitionPattern(text) {
 }
 
 /**
- * Extracts Deep Document Features (Topics, Definitions, Formulas, Numbers, Policies)
- * Used to understand any user-uploaded PDF and formulate dynamic suggested questions.
+ * Extracts Deep Document Features (Topics, Definitions, Formulas, Math Problems, Numbers)
+ * Strictly inspects complete extracted sentences to prevent fragmented questions.
  */
 export function extractDocumentFeatures(document) {
   if (!document || !document.pages) {
@@ -204,6 +219,7 @@ export function extractDocumentFeatures(document) {
       topics: [],
       definitions: [],
       formulas: [],
+      mathProblems: [],
       numericalPolicies: [],
       headings: [],
       procedures: [],
@@ -213,6 +229,7 @@ export function extractDocumentFeatures(document) {
   const topicsMap = new Map();
   const definitions = [];
   const formulas = [];
+  const mathProblems = [];
   const numericalPolicies = [];
   const headings = [];
   const procedures = [];
@@ -222,27 +239,39 @@ export function extractDocumentFeatures(document) {
     const lines = page.text.split('\n').map(l => l.trim()).filter(Boolean);
     const sentences = splitIntoSentences(page.text);
 
-    // 1. Detect Headings & Section Titles
+    // 1. Detect Well-Formed Headings & Section Titles
     for (const line of lines) {
-      if (line.length >= 4 && line.length <= 75) {
-        // Section headers like "Section 1:", "Chapter 2:", "1.1 Attendance", or uppercase titles
-        if (/^(?:section|chapter|part|\d+\.?\d*)\s*[:.-]?\s+[A-Z0-9]/i.test(line) ||
-            (/^[A-Z0-9\s:,-]{5,}$/.test(line) && line.split(/\s+/).length <= 8)) {
-          const cleanedTitle = line.replace(/^(?:section|chapter|part|\d+\.?\d*)\s*[:.-]?\s+/i, '').trim();
-          if (cleanedTitle.length > 3) {
-            headings.push({
-              title: cleanedTitle,
-              pageNum,
-              raw: line,
-            });
+      if (line.length >= 6 && line.length <= 70) {
+        // Must contain at least two words and not be pure numbers
+        const words = line.split(/\s+/).filter(Boolean);
+        if (words.length >= 2 && words.length <= 8) {
+          if (/^(?:section|chapter|part|\d+\.?\d*|problem|exercise|theorem|definition|lemma)\s*[:.-]?\s+[A-Z0-9]/i.test(line) ||
+              (/^[A-Z0-9\s:,-]{6,}$/.test(line))) {
+            const cleanedTitle = line.replace(/^(?:section|chapter|part|\d+\.?\d*)\s*[:.-]?\s+/i, '').trim();
+            if (cleanedTitle.length >= 4 && !/^\d+$/.test(cleanedTitle)) {
+              headings.push({
+                title: cleanedTitle,
+                pageNum,
+                raw: line,
+              });
+            }
           }
         }
       }
     }
 
-    // 2. Sentence-level analysis
+    // 2. Sentence-level analysis (requiring complete, well-formed sentences)
     for (const sentence of sentences) {
+      if (sentence.length < 20 || sentence.split(/\s+/).length < 5) continue;
       const lower = sentence.toLowerCase();
+
+      // Mathematical Problems, Theorems & Exercises
+      if (/^(?:problem|exercise|theorem|lemma|corollary|example)\s*\d*[:.-]/i.test(sentence)) {
+        mathProblems.push({
+          sentence,
+          pageNum,
+        });
+      }
 
       // Definitions
       if (hasDefinitionPattern(sentence)) {
@@ -257,7 +286,7 @@ export function extractDocumentFeatures(document) {
         }
       }
 
-      // Mathematical Formulas & Quantitative Equations
+      // Mathematical Formulas & Equations (with symbol preservation)
       if (hasMathematicalContent(sentence)) {
         formulas.push({
           sentence,
@@ -265,9 +294,9 @@ export function extractDocumentFeatures(document) {
         });
       }
 
-      // Numerical & Regulatory Policies (contains numbers, percentages, thresholds)
+      // Numerical & Regulatory Policies (contains explicit numbers, percentages, thresholds)
       if (/\b\d+(?:\.\d+)?%?\b/.test(sentence) &&
-          /\b(minimum|maximum|at least|limit|threshold|penalty|fine|due|fee|hours|attendance|grade|passing|curfew)\b/i.test(lower)) {
+          /\b(minimum|maximum|at least|limit|threshold|penalty|fine|due|fee|hours|attendance|grade|passing|curfew|rate|tolerance)\b/i.test(lower)) {
         numericalPolicies.push({
           sentence,
           pageNum,
@@ -282,10 +311,10 @@ export function extractDocumentFeatures(document) {
         });
       }
 
-      // Extract Candidate Topics (Capitalized multi-word concepts)
+      // Extract Candidate Topics (Meaningful multi-word capitalized phrases)
       const capMatches = sentence.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g) || [];
       for (const cap of capMatches) {
-        if (!STOPWORDS.has(cap.toLowerCase()) && cap.length > 5) {
+        if (!STOPWORDS.has(cap.toLowerCase()) && cap.length >= 6) {
           topicsMap.set(cap, (topicsMap.get(cap) || 0) + 1);
         }
       }
@@ -295,14 +324,15 @@ export function extractDocumentFeatures(document) {
   // Sort and filter topics
   const sortedTopics = Array.from(topicsMap.entries())
     .sort((a, b) => b[1] - a[1])
-    .filter(([t, count]) => count >= 1 && t.length > 4)
+    .filter(([t, count]) => count >= 1 && t.length >= 5)
     .slice(0, 10)
     .map(([t, count]) => ({ topic: t, frequency: count }));
 
   return {
     topics: sortedTopics,
     definitions: definitions.slice(0, 6),
-    formulas: formulas.slice(0, 6),
+    formulas: formulas.slice(0, 8),
+    mathProblems: mathProblems.slice(0, 6),
     numericalPolicies: numericalPolicies.slice(0, 8),
     headings: headings.slice(0, 8),
     procedures: procedures.slice(0, 8),
@@ -311,7 +341,8 @@ export function extractDocumentFeatures(document) {
 
 /**
  * Generates Dynamic, Document-Grounded Suggested Questions
- * Automatically produces questions matching actual uploaded document contents.
+ * Strictly produces meaningful, grammatically complete questions based on actual document content.
+ * Never generates generic default questions when custom documents are uploaded.
  * @param {Array} documents List of document objects
  * @param {string|null} filterDocId Optional filter to scope to one document
  */
@@ -331,8 +362,12 @@ export function generateDynamicSuggestedQuestions(documents, filterDocId = null)
 
   const addQuestion = (qObj) => {
     const cleanQ = qObj.question.trim();
+    // Validate minimum grammatical quality
+    if (cleanQ.length < 18 || cleanQ.split(/\s+/).length < 4) return;
+    if (!cleanQ.endsWith('?')) return;
+
     const key = cleanQ.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (cleanQ.length > 15 && !seenTexts.has(key)) {
+    if (!seenTexts.has(key)) {
       seenTexts.add(key);
       generatedQuestions.push({
         ...qObj,
@@ -345,11 +380,72 @@ export function generateDynamicSuggestedQuestions(documents, filterDocId = null)
   for (const doc of targetDocs) {
     const features = extractDocumentFeatures(doc);
 
-    // 1. Questions from Section Headings & Titles
+    // 1. Questions from Mathematical Problems & Theorems
+    for (const mp of features.mathProblems) {
+      const match = mp.sentence.match(/^(Problem|Exercise|Theorem|Lemma)\s*(\d*[:.-]?\s*[^.]+)/i);
+      if (match) {
+        const itemLabel = match[1];
+        const itemContent = match[2].slice(0, 40).replace(/[:.-]/g, '').trim();
+        addQuestion({
+          question: `How is ${itemLabel} ${itemContent} formulated and solved?`,
+          expectedDoc: doc.name,
+          docId: doc.id,
+          pageNum: mp.pageNum,
+          category: 'Mathematics',
+          tag: itemLabel,
+        });
+      }
+    }
+
+    // 2. Questions from Mathematical Formulas & Equations
+    for (const f of features.formulas) {
+      // Find what the formula calculates
+      const eqMatch = f.sentence.match(/([A-Z][a-zA-Z0-9_\s]{2,25})\s*(?:is calculated using the formula|is given by the equation|is defined by|=)\s*([^.]+)/i);
+      if (eqMatch) {
+        const formulaName = eqMatch[1].trim();
+        addQuestion({
+          question: `What is the formula and calculation for ${formulaName}?`,
+          expectedDoc: doc.name,
+          docId: doc.id,
+          pageNum: f.pageNum,
+          category: 'Formula',
+          tag: formulaName,
+        });
+      } else if (/[∫∑√πθ∂x²]/.test(f.sentence)) {
+        // Contains explicit calculus/algebra symbols
+        const words = f.sentence.split(/\s+/).slice(0, 5).join(' ').replace(/[^a-zA-Z0-9 ]/g, '').trim();
+        if (words.length >= 6) {
+          addQuestion({
+            question: `What is the mathematical equation and derivation for ${words.toLowerCase()}?`,
+            expectedDoc: doc.name,
+            docId: doc.id,
+            pageNum: f.pageNum,
+            category: 'Mathematics',
+            tag: 'Calculus',
+          });
+        }
+      }
+    }
+
+    // 3. Questions from Definitions
+    for (const def of features.definitions) {
+      if (def.term.length >= 3 && def.term.length <= 40) {
+        addQuestion({
+          question: `How is ${def.term} defined in the document?`,
+          expectedDoc: doc.name,
+          docId: doc.id,
+          pageNum: def.pageNum,
+          category: 'Definition',
+          tag: def.term,
+        });
+      }
+    }
+
+    // 4. Questions from Section Headings & Titles
     for (const h of features.headings) {
       const cleanTitle = h.title.replace(/[0-9.:\-_]/g, '').trim();
-      if (cleanTitle.length > 4) {
-        if (/policy|guideline|rule|regulation/i.test(cleanTitle)) {
+      if (cleanTitle.length >= 5 && cleanTitle.split(/\s+/).length >= 2) {
+        if (/policy|guideline|rule|regulation|protocol|requirement/i.test(cleanTitle)) {
           addQuestion({
             question: `What are the ${cleanTitle.toLowerCase()}?`,
             expectedDoc: doc.name,
@@ -371,104 +467,30 @@ export function generateDynamicSuggestedQuestions(documents, filterDocId = null)
       }
     }
 
-    // 2. Questions from Definitions
-    for (const def of features.definitions) {
-      addQuestion({
-        question: `How is "${def.term}" defined in the document?`,
-        expectedDoc: doc.name,
-        docId: doc.id,
-        pageNum: def.pageNum,
-        category: 'Definition',
-        tag: def.term,
-      });
-    }
-
-    // 3. Questions from Numerical Policies & Thresholds
+    // 5. Questions from Numerical Policies & Thresholds
     for (const np of features.numericalPolicies) {
-      const words = np.sentence.split(/\s+/);
       const metricMatch = np.sentence.match(/\b(\d+(?:\.\d+)?%?|\$\d+(?:\.\d+)?|\d+\s*(?:days|hours|months|years|weeks))\b/i);
       if (metricMatch) {
-        if (/attendance/i.test(np.sentence)) {
+        // Extract the semantic noun subject from the sentence
+        const words = np.sentence.split(/\s+/);
+        const subjectSnippet = words.slice(0, 5).join(' ').replace(/[^a-zA-Z0-9 ]/g, '').trim();
+        if (subjectSnippet.length >= 6) {
           addQuestion({
-            question: 'What is the minimum attendance requirement?',
+            question: `What is the specific requirement or threshold for ${subjectSnippet.toLowerCase()}?`,
             expectedDoc: doc.name,
             docId: doc.id,
             pageNum: np.pageNum,
-            category: 'Threshold',
-            tag: 'Attendance',
+            category: 'Quantitative',
+            tag: 'Threshold',
           });
-        } else if (/plagiarism|similarity/i.test(np.sentence)) {
-          addQuestion({
-            question: 'What is the acceptable plagiarism limit for capstone projects?',
-            expectedDoc: doc.name,
-            docId: doc.id,
-            pageNum: np.pageNum,
-            category: 'Integrity',
-            tag: 'Plagiarism',
-          });
-        } else if (/hours|operating|opening/i.test(np.sentence)) {
-          addQuestion({
-            question: 'What are the library opening hours?',
-            expectedDoc: doc.name,
-            docId: doc.id,
-            pageNum: np.pageNum,
-            category: 'Facilities',
-            tag: 'Hours',
-          });
-        } else if (/fine|fee|cost|penalty/i.test(np.sentence)) {
-          addQuestion({
-            question: 'What are the penalties or fees specified in the policy?',
-            expectedDoc: doc.name,
-            docId: doc.id,
-            pageNum: np.pageNum,
-            category: 'Financial',
-            tag: 'Fees',
-          });
-        } else {
-          // Extract leading keywords for subject
-          const firstThree = words.slice(0, 4).join(' ').replace(/[^a-zA-Z0-9 ]/g, '').trim();
-          if (firstThree.length > 5) {
-            addQuestion({
-              question: `What is the specific requirement regarding ${firstThree.toLowerCase()}?`,
-              expectedDoc: doc.name,
-              docId: doc.id,
-              pageNum: np.pageNum,
-              category: 'Quantitative',
-              tag: 'Requirement',
-            });
-          }
         }
       }
     }
 
-    // 4. Questions from Mathematical Formulas
-    for (const f of features.formulas) {
-      if (/grading|passing|marks|score|cgpa|assessment|evaluation/i.test(f.sentence)) {
-        addQuestion({
-          question: 'What is the grading scale and passing criteria?',
-          expectedDoc: doc.name,
-          docId: doc.id,
-          pageNum: f.pageNum,
-          category: 'Academics',
-          tag: 'Grading',
-        });
-      } else {
-        const firstWords = f.sentence.split(/\s+/).slice(0, 4).join(' ').replace(/[^a-zA-Z0-9 ]/g, '').trim();
-        addQuestion({
-          question: `What is the formula or calculation for ${firstWords.toLowerCase()}?`,
-          expectedDoc: doc.name,
-          docId: doc.id,
-          pageNum: f.pageNum,
-          category: 'Formula',
-          tag: 'Calculation',
-        });
-      }
-    }
-
-    // 5. Questions from Topics
+    // 6. Questions from Topics
     for (const t of features.topics) {
       addQuestion({
-        question: `What are the core guidelines for ${t.topic.toLowerCase()}?`,
+        question: `What are the core principles and details of ${t.topic.toLowerCase()}?`,
         expectedDoc: doc.name,
         docId: doc.id,
         pageNum: 1,
@@ -483,7 +505,7 @@ export function generateDynamicSuggestedQuestions(documents, filterDocId = null)
 }
 
 /**
- * Splits pages into sliding window passages
+ * Splits pages into sliding window passages with math and symbol awareness
  */
 export function createChunksFromDocument(document, chunkSize = 130, overlap = 30) {
   const chunks = [];
@@ -533,8 +555,8 @@ export function createChunksFromDocument(document, chunkSize = 130, overlap = 30
 }
 
 /**
- * BM25 Okapi Information Retrieval Scorer with Query Expansion,
- * N-gram Proximity Boosting, and Math/Numerical Heuristics.
+ * BM25 Okapi Information Retrieval Scorer with Mathematical Query Matching,
+ * Synonym Expansion, and Strict Passage Grounding.
  */
 export class BM25Engine {
   constructor(chunks = [], options = {}) {
@@ -574,7 +596,7 @@ export class BM25Engine {
   }
 
   /**
-   * Search query against indexed chunks with query expansion and phrase boost
+   * Search query against indexed chunks with query expansion and math symbol boosting
    */
   search(query, filters = {}) {
     if (!query || typeof query !== 'string' || this.docCount === 0) {
@@ -583,7 +605,6 @@ export class BM25Engine {
 
     const rawQueryTokens = tokenize(query, true);
     if (rawQueryTokens.length === 0) {
-      // If all stopwords, fallback to all tokens
       const fallback = tokenize(query, false);
       if (fallback.length === 0) return [];
       return this.searchWithTokens(fallback, query, filters);
@@ -593,7 +614,7 @@ export class BM25Engine {
   }
 
   searchWithTokens(queryTokens, rawQuery, filters = {}) {
-    // 1. Expand query tokens with synonyms
+    // 1. Expand query tokens with synonyms & mathematical equivalents
     const expandedMap = expandQueryTokens(queryTokens);
     const queryStemsWeights = new Map();
 
@@ -661,23 +682,28 @@ export class BM25Engine {
       let phraseBoost = 0;
       const lowerChunkText = chunk.text.toLowerCase();
       
-      // Check full phrase match
       if (cleanQuery.length > 5 && lowerChunkText.includes(cleanQuery)) {
-        phraseBoost += 6.0;
+        phraseBoost += 6.5;
       } else if (queryWords.length >= 2) {
-        // Check bigrams
         for (let i = 0; i < queryWords.length - 1; i++) {
           const bigram = `${queryWords[i]} ${queryWords[i + 1]}`;
           if (lowerChunkText.includes(bigram)) {
-            phraseBoost += 3.0;
+            phraseBoost += 3.2;
           }
         }
       }
 
-      // 4. Mathematical and Definition Heuristic Boost
+      // 4. Mathematical Equation & Symbol Boost
       let heuristicBoost = 0;
       if (isMathQuery && chunk.hasMath) {
-        heuristicBoost += 3.5;
+        heuristicBoost += 4.0;
+        // Extra boost if query symbols like ∫ or ∑ or π are in the chunk text
+        const mathSymbolsInQuery = rawQuery.match(/[∫∑√πθ≥≤≠±∞∂αβγx²x³]/g) || [];
+        for (const sym of mathSymbolsInQuery) {
+          if (chunk.text.includes(sym)) {
+            heuristicBoost += 3.0;
+          }
+        }
       }
       if (isDefQuery && chunk.hasDefinition) {
         heuristicBoost += 3.0;
@@ -721,7 +747,6 @@ export class BM25Engine {
  */
 export function generateExtractiveAnswer(query, rankedChunks, allDocuments = []) {
   if (!query || !rankedChunks || rankedChunks.length === 0) {
-    // Generate intelligent suggested topics from documents
     const suggested = generateDynamicSuggestedQuestions(allDocuments).slice(0, 4);
 
     return {
@@ -743,7 +768,7 @@ export function generateExtractiveAnswer(query, rankedChunks, allDocuments = [])
   if (topChunk.score < 22 && topChunk.matchedTermsCount < 1) {
     const suggested = generateDynamicSuggestedQuestions(allDocuments).slice(0, 4);
     return {
-      answer: "No sufficiently relevant information was found in the indexed documents for this question. DocuMind guarantees truthful, verifiable answers and will not invent or extrapolate policies.",
+      answer: "No sufficiently relevant information was found in the indexed documents for this question. DocuMind guarantees truthful, verifiable answers and will not invent or extrapolate policies or mathematical formulas.",
       found: false,
       confidence: topChunk.score || 0,
       sources: [],
@@ -752,7 +777,7 @@ export function generateExtractiveAnswer(query, rankedChunks, allDocuments = [])
     };
   }
 
-  // Extract sentences from top 3 passages
+  // Extract candidate sentences from top 3 passages
   const candidateSentences = [];
   const topN = rankedChunks.slice(0, 3);
 
@@ -769,10 +794,9 @@ export function generateExtractiveAnswer(query, rankedChunks, allDocuments = [])
       }
 
       if (matchCount > 0 || (isMathQuery && hasMathematicalContent(sentence))) {
-        // Sentence scoring: term overlap + position bias + entity/number presence + math boost
         const overlapRatio = matchCount / Math.max(queryStems.size, 1);
         const containsNumberOrPercent = /\b\d+(?:\.\d+)?%?\b/.test(sentence) ? 1.4 : 1.0;
-        const mathBonus = (isMathQuery && hasMathematicalContent(sentence)) ? 1.5 : 1.0;
+        const mathBonus = (isMathQuery && hasMathematicalContent(sentence)) ? 1.6 : 1.0;
         const sentenceScore = (matchCount * 2.5 + overlapRatio * 5.0) * containsNumberOrPercent * mathBonus;
 
         candidateSentences.push({
@@ -789,7 +813,7 @@ export function generateExtractiveAnswer(query, rankedChunks, allDocuments = [])
 
   if (candidateSentences.length === 0) {
     return {
-      answer: "Relevant documents and passages were identified, but no specific concise sentence answered the query directly. Please inspect the source passages below.",
+      answer: "Relevant documents and passages were identified, but no specific concise sentence answered the query directly. Please inspect the original source passages below.",
       found: true,
       confidence: topChunk.score,
       sources: topN.map(c => ({ docName: c.docName, docId: c.docId, pageNum: c.pageNum, score: c.score })),
@@ -839,7 +863,7 @@ export function generateExtractiveAnswer(query, rankedChunks, allDocuments = [])
 }
 
 /**
- * Highlights matching query words in text
+ * Highlights matching query words and math symbols in text
  */
 export function highlightText(text, query) {
   if (!text || !query) return text;
@@ -854,7 +878,7 @@ export function highlightText(text, query) {
   if (!pattern) return text;
 
   try {
-    const regex = new RegExp(`\\b(${pattern})\\b`, 'gi');
+    const regex = new RegExp(`(${pattern})`, 'gi');
     return text.replace(regex, '<mark class="search-highlight">$1</mark>');
   } catch {
     return text;

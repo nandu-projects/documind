@@ -8,14 +8,21 @@ import {
   Sparkles,
   ArrowRight,
   ShieldCheck,
-  FileCheck
+  FileCheck,
+  Copy,
+  Layers,
+  HelpCircle,
+  Cpu,
+  RefreshCw,
+  Info
 } from 'lucide-react';
 import { useDocuments } from '../../context/DocumentContext';
 
 export default function DocumentUploader({ setActiveTab }) {
   const { uploadPDFFiles, uploadProgress, loadDemoWorkspace } = useDocuments();
   const [isDragging, setIsDragging] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState(null); // { success, message, errors }
+  const [uploadStatus, setUploadStatus] = useState(null); // { success, message, errors, duplicates, processedDocs }
+  const [pendingFiles, setPendingFiles] = useState(null);
   const fileInputRef = useRef(null);
 
   const handleDragOver = (e) => {
@@ -42,21 +49,28 @@ export default function DocumentUploader({ setActiveTab }) {
     }
   };
 
-  const processFiles = async (files) => {
+  const processFiles = async (files, options = { replaceDuplicates: false }) => {
     setUploadStatus(null);
+    setPendingFiles(files);
     try {
-      const result = await uploadPDFFiles(files);
-      if (result.success) {
+      const result = await uploadPDFFiles(files, options);
+      if (result.success || (result.duplicates && result.duplicates.length > 0)) {
         setUploadStatus({
-          type: 'success',
-          message: `Successfully extracted and indexed ${result.successCount} document(s)!`,
+          type: result.success ? 'success' : 'warning',
+          message: result.success
+            ? `Successfully extracted and indexed ${result.successCount} document(s)!`
+            : 'Duplicate documents detected in your library.',
           errors: result.errors,
+          duplicates: result.duplicates,
+          processedDocs: result.processedDocs || [],
         });
       } else {
         setUploadStatus({
           type: 'error',
           message: 'No valid documents were processed.',
           errors: result.errors,
+          duplicates: [],
+          processedDocs: [],
         });
       }
     } catch (err) {
@@ -64,11 +78,19 @@ export default function DocumentUploader({ setActiveTab }) {
         type: 'error',
         message: err.message || 'An error occurred during PDF extraction.',
         errors: [],
+        duplicates: [],
+        processedDocs: [],
       });
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  };
+
+  const handleReplaceDuplicate = async () => {
+    if (pendingFiles) {
+      await processFiles(pendingFiles, { replaceDuplicates: true });
     }
   };
 
@@ -80,7 +102,7 @@ export default function DocumentUploader({ setActiveTab }) {
           Upload & Index Documents
         </h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 max-w-lg mx-auto">
-          Upload multiple PDF files. Text is parsed page-by-page directly in your browser and indexed locally into IndexedDB with zero cloud transmission.
+          Upload multi-page PDFs. Text is spatially ordered, mathematical formulas and symbols are preserved, and duplicate files are detected locally via SHA-256.
         </p>
       </div>
 
@@ -115,7 +137,7 @@ export default function DocumentUploader({ setActiveTab }) {
               Drag and drop your PDF files here
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Supports multiple PDFs up to 50MB each • Bi-directional passage indexing
+              Multi-column ordering • Math symbol preservation (∫, ∑, √, π, θ, ≥, ≤, x²) • SHA-256 duplicate checking
             </p>
           </div>
 
@@ -162,8 +184,154 @@ export default function DocumentUploader({ setActiveTab }) {
         </div>
       )}
 
+      {/* Duplicate Document Detection Alert */}
+      {uploadStatus && uploadStatus.duplicates && uploadStatus.duplicates.length > 0 && (
+        <div className="p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 space-y-3 animate-fadeIn">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-2 font-bold text-sm">
+              <Copy className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              <span>Duplicate Document(s) Detected</span>
+            </div>
+            <button
+              onClick={() => setUploadStatus(prev => ({ ...prev, duplicates: [] }))}
+              className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <p className="text-xs text-slate-600 dark:text-slate-400">
+            The following files are already indexed in your library:
+          </p>
+
+          <ul className="text-xs space-y-1.5 list-disc list-inside">
+            {uploadStatus.duplicates.map((dup, i) => (
+              <li key={i}>
+                <strong>"{dup.fileName}"</strong> — {dup.reason} (Matches existing: <em>{dup.existingDoc?.name}</em>)
+              </li>
+            ))}
+          </ul>
+
+          <div className="pt-2 flex flex-wrap gap-2.5">
+            <button
+              onClick={handleReplaceDuplicate}
+              className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Replace Existing Document</span>
+            </button>
+            <button
+              onClick={() => setUploadStatus(prev => ({ ...prev, duplicates: [] }))}
+              className="px-4 py-2 rounded-xl bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all cursor-pointer"
+            >
+              Keep Existing (Skip Re-indexing)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Document Quality Assessment Check */}
+      {uploadStatus && uploadStatus.processedDocs && uploadStatus.processedDocs.length > 0 && (
+        <div className="space-y-4 animate-fadeIn">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <FileCheck className="w-5 h-5 text-indigo-600" />
+              <span>Document Extraction Quality Check</span>
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {uploadStatus.processedDocs.map((doc) => (
+              <div
+                key={doc.id}
+                className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white truncate" title={doc.name}>
+                      {doc.name}
+                    </h4>
+                    <span className="text-[11px] text-slate-400">
+                      SHA-256: {doc.hash ? doc.hash.substring(0, 16) + '...' : 'Verified'}
+                    </span>
+                  </div>
+
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                      doc.isScanned
+                        ? 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300'
+                        : doc.qualityScore >= 85
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                    }`}
+                  >
+                    {doc.qualityRating} ({doc.qualityScore}%)
+                  </span>
+                </div>
+
+                {/* Metrics Breakdown Grid */}
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold">Total Pages</span>
+                    <p className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">{doc.pageCount}</p>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold">Extracted Pages</span>
+                    <p className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">{doc.successfulPages}</p>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold">Passages</span>
+                    <p className="font-bold text-slate-800 dark:text-slate-200 mt-0.5">{doc.meaningfulPassages || 0}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-100 dark:border-slate-800">
+                  <span className="flex items-center gap-1.5">
+                    <HelpCircle className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Generated Questions: <strong>{doc.generatedQuestionsCount || 0}</strong></span>
+                  </span>
+
+                  {doc.hasMath && (
+                    <span className="px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 text-[10px] font-bold">
+                      Math / Formulas Detected
+                    </span>
+                  )}
+                </div>
+
+                {/* Scanned / OCR Alert if any page is image-only */}
+                {doc.ocrRequiredPages && doc.ocrRequiredPages.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 text-xs text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold">OCR Notice:</span> Pages{' '}
+                      <strong>{doc.ocrRequiredPages.join(', ')}</strong> contain image-only or low-density text. Optical Character Recognition (OCR) is required to index bitmap images.
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="pt-2 flex gap-3 justify-center">
+            <button
+              onClick={() => setActiveTab('qa')}
+              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>Ask Document Questions</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setActiveTab('library')}
+              className="px-5 py-2.5 rounded-xl bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-xs border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all cursor-pointer"
+            >
+              View Document Library
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Upload Feedback Status */}
-      {uploadStatus && (
+      {uploadStatus && uploadStatus.type !== 'warning' && (
         <div
           className={`p-5 rounded-2xl border space-y-2 ${
             uploadStatus.type === 'success'
@@ -198,24 +366,6 @@ export default function DocumentUploader({ setActiveTab }) {
               </ul>
             </div>
           )}
-
-          {uploadStatus.type === 'success' && (
-            <div className="pt-3 flex gap-3">
-              <button
-                onClick={() => setActiveTab('qa')}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-              >
-                <span>Ask Questions Now</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => setActiveTab('library')}
-                className="px-4 py-2 rounded-xl bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-semibold text-xs border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all cursor-pointer"
-              >
-                View in Document Library
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -238,9 +388,9 @@ export default function DocumentUploader({ setActiveTab }) {
             <FileCheck className="w-4 h-4" />
           </div>
           <div>
-            <h4 className="text-xs font-bold text-slate-900 dark:text-white">Page-By-Page Indexing</h4>
+            <h4 className="text-xs font-bold text-slate-900 dark:text-white">Math & Reading Order</h4>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed mt-0.5">
-              Every sentence and paragraph is tagged with exact page numbers for authentic verification.
+              Multi-column separation, hyphen repair, and unicode equations (∫, ∑, √, π, θ, ≥, ≤, x²) are preserved.
             </p>
           </div>
         </div>
@@ -250,9 +400,9 @@ export default function DocumentUploader({ setActiveTab }) {
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <h4 className="text-xs font-bold text-slate-900 dark:text-white">Instant Demo Mode</h4>
+            <h4 className="text-xs font-bold text-slate-900 dark:text-white">Duplicate Detection</h4>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed mt-0.5">
-              No files handy? Load 4 realistic academic and institutional PDFs in one click.
+              SHA-256 fingerprinting prevents re-indexing existing files and allows instant replacement.
             </p>
           </div>
         </div>

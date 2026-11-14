@@ -67,6 +67,20 @@ export async function getDocumentById(id) {
   return await db.get('documents', id);
 }
 
+export async function findDuplicateDocument(hash, name, size) {
+  const db = await getDB();
+  const allDocs = await db.getAll('documents');
+  for (const doc of allDocs) {
+    if (hash && doc.hash && doc.hash === hash) {
+      return { isDuplicate: true, reason: 'identical_hash', existingDoc: doc };
+    }
+    if (name && doc.name && doc.name.toLowerCase() === name.toLowerCase() && Math.abs(doc.size - size) < 10) {
+      return { isDuplicate: true, reason: 'identical_name_and_size', existingDoc: doc };
+    }
+  }
+  return { isDuplicate: false, reason: null, existingDoc: null };
+}
+
 export async function deleteDocument(id) {
   const db = await getDB();
   const doc = await db.get('documents', id);

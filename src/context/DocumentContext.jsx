@@ -9,6 +9,7 @@ import {
   getSearchHistory,
   saveSearchQuery,
   logActivity,
+  findDuplicateDocument,
 } from '../services/db';
 import { extractPDFText } from '../services/pdfParser';
 import {
@@ -76,20 +77,19 @@ export function DocumentProvider({ children }) {
 
   /**
    * Determine suggested questions dynamically:
-   * 1. If no documents -> empty.
-   * 2. If ONLY demo documents -> return SAMPLE_QUESTIONS.
-   * 3. If USER has uploaded actual documents -> dynamically generate from user documents! Never show unrelated demo questions.
+   * 1. If no documents -> empty list.
+   * 2. If USER has uploaded any documents -> ONLY generate from user uploaded documents!
+   *    Never mix in demo questions (library, attendance, security) when user documents exist.
+   * 3. If ONLY demo documents are loaded -> return SAMPLE_QUESTIONS.
    */
   const suggestedQuestions = useMemo(() => {
     if (documents.length === 0) return [];
 
-    const hasUserUploads = documents.some(d => !d.isDemo);
+    const userDocs = documents.filter(d => !d.isDemo);
 
-    if (hasUserUploads) {
-      // Prioritize non-demo user-uploaded documents
-      const userDocs = documents.filter(d => !d.isDemo);
-      const generated = generateDynamicSuggestedQuestions(userDocs);
-      return generated.length > 0 ? generated : generateDynamicSuggestedQuestions(documents);
+    if (userDocs.length > 0) {
+      // Exclusively generate from user documents
+      return generateDynamicSuggestedQuestions(userDocs);
     }
 
     // Only demo documents are present
@@ -100,16 +100,24 @@ export function DocumentProvider({ children }) {
    * Get suggested questions specifically scoped to a document filter
    */
   const getScopedSuggestedQuestions = useCallback((filterDocId = null) => {
-    if (!filterDocId) return suggestedQuestions;
+    const userDocs = documents.filter(d => !d.isDemo);
 
-    const targetDoc = documents.find(d => d.id === filterDocId);
-    if (!targetDoc) return suggestedQuestions;
+    if (filterDocId) {
+      const targetDoc = documents.find(d => d.id === filterDocId);
+      if (!targetDoc) return suggestedQuestions;
 
-    if (targetDoc.isDemo) {
-      return SAMPLE_QUESTIONS.filter(sq => sq.expectedDoc === targetDoc.name);
+      // If user documents exist, never show demo questions even if filterDocId points to demo
+      if (targetDoc.isDemo) {
+        if (userDocs.length > 0) {
+          return generateDynamicSuggestedQuestions(userDocs);
+        }
+        return SAMPLE_QUESTIONS.filter(sq => sq.expectedDoc === targetDoc.name);
+      }
+
+      return generateDynamicSuggestedQuestions([targetDoc]);
     }
 
-    return generateDynamicSuggestedQuestions([targetDoc]);
+    return suggestedQuestions;
   }, [documents, suggestedQuestions]);
 
   /**
@@ -138,7 +146,6 @@ export function DocumentProvider({ children }) {
           statusText: `Chunking & tokenizing ${demoDoc.name}...`,
         }));
 
-        // Generate chunks
         const docChunks = createChunksFromDocument(demoDoc, 120, 25);
         await saveDocument(demoDoc, docChunks);
       }
@@ -164,15 +171,19 @@ export function DocumentProvider({ children }) {
   };
 
   /**
-   * Upload and index one or multiple PDF files
+   * Upload and index PDF files with Duplicate Detection & Quality Assessment
+   * @param {FileList|Array} fileList
+   * @param {Object} options { replaceDuplicates: boolean }
    */
-  const uploadPDFFiles = async (fileList) => {
+  const uploadPDFFiles = async (fileList, options = { replaceDuplicates: false }) => {
     const files = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf');
     if (files.length === 0) {
       throw new Error('No PDF files found. Please select valid .pdf files.');
     }
 
     const errors = [];
+    const duplicates = [];
+    const processedDocs = [];
     let successCount = 0;
 
     setUploadProgress({
@@ -183,7 +194,7 @@ export function DocumentProvider({ children }) {
       totalPages: 0,
       currentFileIndex: 1,
       totalFiles: files.length,
-      statusText: 'Validating PDF integrity and structure...',
+      statusText: 'Validating PDF integrity, magic bytes, and reading order...',
     });
 
     for (let i = 0; i < files.length; i++) {
@@ -197,7 +208,7 @@ export function DocumentProvider({ children }) {
           statusText: `Parsing pages from "${file.name}"...`,
         }));
 
-        // Extract text page by page with PDF.js
+        // Extract text page by page with spatial layout, math symbols, and duplicate hash
         const extractedDoc = await extractPDFText(file, (percent, curr, total) => {
           setUploadProgress(prev => ({
             ...prev,
@@ -208,18 +219,39 @@ export function DocumentProvider({ children }) {
           }));
         });
 
+        // Duplicate Detection Check
+        const dupCheck = await findDuplicateDocument(extractedDoc.hash, extractedDoc.name, extractedDoc.size);
+        if (dupCheck.isDuplicate && !options.replaceDuplicates) {
+          duplicates.push({
+            fileName: file.name,
+            reason: dupCheck.reason === 'identical_hash' ? 'Exact duplicate (SHA-256 matched)' : 'Identical file name and size',
+            existingDoc: dupCheck.existingDoc,
+            newDoc: extractedDoc,
+          });
+          continue; // Skip re-indexing duplicate unless user requested replace
+        } else if (dupCheck.isDuplicate && options.replaceDuplicates) {
+          // Delete existing duplicate document first
+          await deleteDocument(dupCheck.existingDoc.id);
+        }
+
         // Mark as user upload (not demo)
         extractedDoc.isDemo = false;
 
         // Break into passages & compute tokens
         setUploadProgress(prev => ({
           ...prev,
-          statusText: `Indexing passages for Information Retrieval...`,
+          statusText: `Indexing passages for BM25 retrieval...`,
         }));
         const docChunks = createChunksFromDocument(extractedDoc, 130, 30);
+        extractedDoc.meaningfulPassages = docChunks.length;
+
+        // Compute generated questions count
+        const genQ = generateDynamicSuggestedQuestions([extractedDoc]);
+        extractedDoc.generatedQuestionsCount = genQ.length;
 
         // Save to IndexedDB
         await saveDocument(extractedDoc, docChunks);
+        processedDocs.push(extractedDoc);
         successCount++;
       } catch (err) {
         console.error(`Error processing "${file.name}":`, err);
@@ -243,7 +275,9 @@ export function DocumentProvider({ children }) {
     return {
       success: successCount > 0,
       successCount,
+      duplicates,
       errors,
+      processedDocs,
     };
   };
 
@@ -291,8 +325,12 @@ export function DocumentProvider({ children }) {
     const rankedPassages = bm25Engine.search(question, { ...filters, limit: 12 });
     const duration = Math.round(performance.now() - startTime);
 
-    // Filter documents matching scope
-    const targetDocs = filters.docId ? documents.filter(d => d.id === filters.docId) : documents;
+    // Filter documents matching scope (isolating user docs from demo docs)
+    const userDocs = documents.filter(d => !d.isDemo);
+    let targetDocs = filters.docId
+      ? documents.filter(d => d.id === filters.docId)
+      : (userDocs.length > 0 ? userDocs : documents);
+
     const answerResult = generateExtractiveAnswer(question, rankedPassages, targetDocs);
 
     if (question && question.trim().length > 1) {
